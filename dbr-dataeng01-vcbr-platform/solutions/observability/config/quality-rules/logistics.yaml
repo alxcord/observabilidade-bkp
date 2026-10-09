@@ -1,0 +1,75 @@
+# Regras de Data Quality do dominio de logistica.
+#
+# ARQUIVO DE EXEMPLO: os ativos e colunas abaixo sao ilustrativos e precisam
+# ser trocados pelos reais antes de uso. Ele existe tambem porque os testes
+# de data_quality.py validam a carga contra o YAML que esta no repositorio:
+# um exemplo que nao carrega deixaria de ser exemplo.
+#
+# Uma regra por tipo suportado (ver data_quality/constants.py).
+
+rules:
+  - id: entrega_id_nao_nulo
+    version: "1"
+    type: not_null
+    asset: prd_logistics.corp_curated.tbl_entrega
+    columns: [entrega_id, data_entrega]
+    description: Entrega sem identificador ou sem data nao pode seguir para consumo.
+    severity: HIGH
+    domain: Logistics
+    blocking: true
+
+  - id: entrega_id_unico
+    version: "1"
+    type: unique
+    asset: prd_logistics.corp_curated.tbl_entrega
+    columns: [entrega_id]
+    description: Cada entrega aparece uma unica vez.
+    severity: HIGH
+    domain: Logistics
+    blocking: true
+
+  - id: entrega_status_valido
+    version: "1"
+    type: domain
+    asset: prd_logistics.corp_curated.tbl_entrega
+    columns: [status]
+    parameters:
+      values: [PENDENTE, EM_TRANSITO, ENTREGUE, CANCELADA]
+    description: Status fora do dominio publicado indica carga com erro.
+    severity: MEDIUM
+    domain: Logistics
+
+  - id: entrega_peso_dentro_da_faixa
+    version: "1"
+    type: range
+    asset: prd_logistics.corp_curated.tbl_entrega
+    columns: [peso_kg]
+    parameters:
+      min: 0
+      max: 60000
+    description: Peso negativo ou acima da capacidade de um caminhao.
+    severity: MEDIUM
+    domain: Logistics
+    threshold_pct: 0.5
+
+  - id: entrega_veiculo_existe
+    version: "1"
+    type: reference
+    asset: prd_logistics.corp_curated.tbl_entrega
+    columns: [veiculo_id]
+    parameters:
+      reference_table: prd_logistics.corp_curated.tbl_veiculo
+      reference_column: veiculo_id
+    description: Toda entrega aponta para um veiculo cadastrado.
+    severity: HIGH
+    domain: Logistics
+
+  - id: entrega_data_coerente
+    version: "1"
+    type: expression
+    asset: prd_logistics.corp_curated.tbl_entrega
+    parameters:
+      invalid_condition: data_entrega < data_saida
+    description: A entrega nao pode ocorrer antes da saida.
+    severity: MEDIUM
+    domain: Logistics

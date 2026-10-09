@@ -1,0 +1,25 @@
+# observability-collector/azure-pipelines.yml
+#
+# Dispara quando algo dentro desta pasta muda, ou quando o módulo
+# compartilhado de resolução de evento muda — o Dockerfile copia
+# src/shared/event_resolution.py, então uma alteração ali precisa
+# reconstruir esta imagem também. Toda a lógica de esteira vem do template
+# compartilhado — criar um projeto novo é copiar a pasta.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - src/observability-collector/*
+      - src/shared/event_resolution.py
+
+extends:
+  template: ../templates/test-build-push-deploy.yml
+  parameters:
+    projectPath: src/observability-collector
+    imageName: observability-collector
+    # Raiz do repositório, não a pasta do projeto: o Dockerfile copia
+    # src/shared/event_resolution.py, que fica fora daqui e é compartilhado
+    # com o publicador — não pode ser duplicado dentro do projeto.
+    buildContext: $(Build.SourcesDirectory)

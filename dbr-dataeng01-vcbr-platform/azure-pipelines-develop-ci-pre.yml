@@ -1,0 +1,721 @@
+# azure-pipelines-develop-ci-pre.yml
+# AI Code Review em Pull Requests usando Azure AI Foundry / Azure OpenAI v1 Responses API.
+#
+# Variaveis necessarias no pipeline:
+#   foundryEndpoint  -> https://afeu2-ailab-vcdigital-dev-vcbr.services.ai.azure.com/openai/v1
+#   foundryApiKey    -> API key do Foundry. Marcar como secret.
+#   foundryModel     -> gpt-5.3-codex
+#
+# Permissoes necessarias:
+#   - Build Service com Read no repositorio
+#   - Build Service com Contribute to Pull Requests = Allow
+#   - Pipeline configurado como Build Validation na branch Develop, preferencialmente Optional
+#
+# Observacao:
+#   Este pipeline e best effort. Falhas na IA, no diff ou no comentario viram warning
+#   e nao devem bloquear o merge/deploy.
+#
+# Comportamento de comentarios:
+#   - 1 comentario geral com veredito e resumo
+#   - 1 comentario separado para cada problema retornado pela IA
+#
+# A IA deve retornar JSON conforme contrato definido em .azuredevops/review-prompt.md.
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - Develop
+
+variables:
+  FOUNDRY_ENDPOINT: $(foundryEndpoint)
+  FOUNDRY_MODEL: $(foundryModel)
+  DEBUG_MODE: 'false'
+
+pool:
+  # Imagem fixa: o label ubuntu-latest migra para Ubuntu 26.04 entre
+  # 19/10/2026 e 19/11/2026. Fixar evita a troca silenciosa do agente.
+  vmImage: ubuntu-24.04
+
+stages:
+- stage: CodeReview
+  displayName: 'AI Code Review'
+
+  jobs:
+  - job: ReviewJob
+    displayName: 'Revisar codigo com Azure AI Foundry'
+    continueOnError: true
+
+    steps:
+    - checkout: self
+      fetchDepth: 0
+      persistCredentials: true
+      displayName: 'Checkout com historico completo'
+
+    # ------------------------------------------------------
+    # 1. Extrair diff entre a branch da PR e a branch alvo
+    # ------------------------------------------------------
+    - bash: |
+        set -euo pipefail
+
+        echo "Build.Reason: ${BUILD_REASON:-}"
+        echo "Source branch: ${SYSTEM_PULLREQUEST_SOURCEBRANCH:-}"
+        echo "Target branch: ${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+        echo "PR ID: ${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
+
+        if [[ "${DEBUG_MODE,,}" == "true" ]]; then
+          echo "##[group]Diagnostico do contexto da PR"
+          echo "DEBUG_MODE=${DEBUG_MODE}"
+          echo "BUILD_REASON=${BUILD_REASON:-}"
+          echo "SYSTEM_PULLREQUEST_SOURCEBRANCH=${SYSTEM_PULLREQUEST_SOURCEBRANCH:-}"
+          echo "SYSTEM_PULLREQUEST_TARGETBRANCH=${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+          echo "SYSTEM_PULLREQUEST_PULLREQUESTID=${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
+          echo "SYSTEM_TEAMFOUNDATIONCOLLECTIONURI=${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI:-}"
+          echo "SYSTEM_TEAMPROJECT=${SYSTEM_TEAMPROJECT:-}"
+          echo "BUILD_REPOSITORY_ID=${BUILD_REPOSITORY_ID:-}"
+          echo "BUILD_REPOSITORY_NAME=${BUILD_REPOSITORY_NAME:-}"
+          echo "Tamanho do System.AccessToken=${#SYSTEM_ACCESSTOKEN}"
+          echo "##[endgroup]"
+        fi
+
+        if [ -z "${SYSTEM_PULLREQUEST_PULLREQUESTID:-}" ]; then
+          echo "##vso[task.logissue type=warning]Este pipeline foi executado fora do contexto de PR. Nao ha PR ID para comentar."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+          echo "##vso[task.logissue type=warning]SYSTEM_ACCESSTOKEN nao disponivel. Nao foi possivel autenticar o git fetch. AI Code Review sera ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+        TARGET_BRANCH="${TARGET_BRANCH#refs/heads/}"
+
+        if [ -z "${TARGET_BRANCH}" ]; then
+          echo "##vso[task.logissue type=warning]Branch alvo nao identificada. AI Code Review sera ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        echo "Target branch normalizado: ${TARGET_BRANCH}"
+
+        if ! git -c http.extraheader="AUTHORIZATION: bearer ${SYSTEM_ACCESSTOKEN}" \
+          fetch origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"; then
+          echo "##vso[task.logissue type=warning]Falha ao buscar a branch alvo origin/${TARGET_BRANCH}. AI Code Review sera ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        git diff "origin/${TARGET_BRANCH}"...HEAD --name-only > /tmp/changed_files.txt
+        git diff "origin/${TARGET_BRANCH}"...HEAD > /tmp/diff_full.txt
+
+        FULL_SIZE=$(wc -c < /tmp/diff_full.txt)
+        MAX_SIZE=100000
+
+        head -c ${MAX_SIZE} /tmp/diff_full.txt > /tmp/diff.txt
+
+        echo "Arquivos alterados:"
+        cat /tmp/changed_files.txt
+
+        echo "Tamanho total do diff: ${FULL_SIZE} bytes"
+
+        if [ "${FULL_SIZE}" -eq 0 ]; then
+          echo "##vso[task.logissue type=warning]Diff vazio. AI Code Review sera ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        if [ "${FULL_SIZE}" -gt "${MAX_SIZE}" ]; then
+          echo "Diff maior que ${MAX_SIZE} bytes. Revisao parcial dos primeiros ${MAX_SIZE} bytes." > /tmp/truncation_warning.txt
+        else
+          echo "" > /tmp/truncation_warning.txt
+        fi
+      displayName: 'Extrair diff do PR'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        DEBUG_MODE: $(DEBUG_MODE)
+
+    # ------------------------------------------------------
+    # 2. Chamar Azure AI Foundry / Azure OpenAI v1 Responses API
+    # ------------------------------------------------------
+    - bash: |
+        set -euo pipefail
+
+        HTTP_CODE="000"
+        CURL_EXIT=0
+
+        # Executa a chamada sem expor headers e mantem corpo e status separados.
+        curl_request() {
+          local request_name="$1"
+          local response_file="$2"
+          local expected_statuses="$3"
+          local request_ok="false"
+          shift 3
+
+          if HTTP_CODE=$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            "$@"); then
+            CURL_EXIT=0
+          else
+            CURL_EXIT=$?
+          fi
+
+          HTTP_CODE="${HTTP_CODE:-000}"
+
+          if [ "${CURL_EXIT}" -eq 0 ]; then
+            if [ "${expected_statuses}" = "2xx" ] && [[ "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
+              request_ok="true"
+            elif [[ " ${expected_statuses} " == *" ${HTTP_CODE} "* ]]; then
+              request_ok="true"
+            fi
+          fi
+
+          echo "Chamada: ${request_name}"
+          echo "Codigo HTTP: ${HTTP_CODE}"
+
+          if [[ "${DEBUG_MODE,,}" == "true" || "${request_ok}" != "true" ]]; then
+            echo "##[group]Corpo da resposta - ${request_name}"
+            if [ -s "${response_file}" ]; then
+              cat "${response_file}"
+              echo
+            else
+              echo "(vazio)"
+            fi
+            echo "##[endgroup]"
+          fi
+
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            echo "Falha de transporte do curl (codigo ${CURL_EXIT})."
+            return "${CURL_EXIT}"
+          fi
+
+          if [ "${request_ok}" != "true" ]; then
+            echo "A chamada retornou um status HTTP inesperado."
+            return 1
+          fi
+
+          return 0
+        }
+
+        if [ -f "/tmp/ai_review_status.env" ]; then
+          source /tmp/ai_review_status.env
+        fi
+
+        if [ "${AI_REVIEW_SKIPPED:-false}" = "true" ]; then
+          echo "AI Review ignorado por falha anterior."
+          exit 0
+        fi
+
+        if [ -z "${FOUNDRY_API_KEY:-}" ]; then
+          echo "##vso[task.logissue type=warning]Variavel foundryApiKey nao definida. AI Review ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        if [ -z "${FOUNDRY_ENDPOINT:-}" ]; then
+          echo "##vso[task.logissue type=warning]Variavel foundryEndpoint nao definida. AI Review ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        if [ -z "${FOUNDRY_MODEL:-}" ]; then
+          echo "##vso[task.logissue type=warning]Variavel foundryModel nao definida. AI Review ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        if [ ! -f ".azuredevops/review-prompt.md" ]; then
+          echo "##vso[task.logissue type=warning]Arquivo .azuredevops/review-prompt.md nao encontrado. AI Review ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        ENDPOINT="${FOUNDRY_ENDPOINT%/}"
+
+        echo "Enviando diff para Azure AI Foundry..."
+        echo "Endpoint: ${ENDPOINT}"
+        echo "Model/deployment: ${FOUNDRY_MODEL}"
+        echo "Rota: ${ENDPOINT}/responses"
+
+        python3 - <<'PYEOF'
+        import json
+        import os
+        import textwrap
+
+        with open('.azuredevops/review-prompt.md', 'r', encoding='utf-8') as f:
+            review_prompt = f.read()
+
+        with open('/tmp/diff.txt', 'r', encoding='utf-8', errors='replace') as f:
+            diff = f.read()
+
+        with open('/tmp/changed_files.txt', 'r', encoding='utf-8', errors='replace') as f:
+            files = f.read()
+
+        with open('/tmp/truncation_warning.txt', 'r', encoding='utf-8', errors='replace') as f:
+            truncation_warning = f.read().strip()
+
+        source_branch = os.environ.get('SYSTEM_PULLREQUEST_SOURCEBRANCH', '')
+        target_branch = os.environ.get('SYSTEM_PULLREQUEST_TARGETBRANCH', '')
+        pr_id = os.environ.get('SYSTEM_PULLREQUEST_PULLREQUESTID', '')
+
+        input_text = f'''
+        {review_prompt}
+
+        ---
+
+        ## Pull Request
+
+        Branch de origem: {source_branch}
+        Branch alvo: {target_branch}
+        PR ID: {pr_id}
+
+        ## Aviso sobre truncamento
+
+        {truncation_warning if truncation_warning else 'Diff completo dentro do limite configurado.'}
+
+        ## Arquivos alterados
+
+        {files}
+
+        ## Diff
+
+        ```diff
+        {diff}
+        ```
+        '''
+
+        body = {
+            'model': os.environ['FOUNDRY_MODEL'],
+            'input': textwrap.dedent(input_text).strip(),
+            'max_output_tokens': 4000
+        }
+
+        with open('/tmp/request_body.json', 'w', encoding='utf-8') as f:
+            json.dump(body, f, ensure_ascii=False)
+
+        print('Request body gerado com sucesso.')
+        PYEOF
+
+        if [[ "${DEBUG_MODE,,}" == "true" ]]; then
+          echo "##[group]Diagnostico Azure AI Foundry"
+          echo "DEBUG_MODE=${DEBUG_MODE}"
+          echo "FOUNDRY_ENDPOINT=${FOUNDRY_ENDPOINT}"
+          echo "FOUNDRY_MODEL=${FOUNDRY_MODEL}"
+          echo "Rota montada=${ENDPOINT}/responses"
+          echo "SYSTEM_PULLREQUEST_SOURCEBRANCH=${SYSTEM_PULLREQUEST_SOURCEBRANCH:-}"
+          echo "SYSTEM_PULLREQUEST_TARGETBRANCH=${SYSTEM_PULLREQUEST_TARGETBRANCH:-}"
+          echo "SYSTEM_PULLREQUEST_PULLREQUESTID=${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
+          echo "Tamanho da Foundry API key=${#FOUNDRY_API_KEY}"
+          echo "Tamanho do request body=$(wc -c < /tmp/request_body.json) bytes"
+
+          if ! curl_request "IP publico de saida" "/tmp/foundry-public-ip.json" "2xx" \
+            --max-time 5 \
+            --connect-timeout 3 \
+            --request GET "https://api.ipify.org?format=json" \
+            --header "Accept: application/json"; then
+            echo "Nao foi possivel obter o IP publico de saida."
+          fi
+          echo "##[endgroup]"
+        fi
+
+        if ! curl_request "Azure AI Foundry Responses API" "/tmp/foundry_response.json" "200" \
+          --request POST "${ENDPOINT}/responses" \
+          --header "Content-Type: application/json" \
+          --header "api-key: ${FOUNDRY_API_KEY}" \
+          --data @/tmp/request_body.json; then
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            exit "${CURL_EXIT}"
+          fi
+          echo "##vso[task.logissue type=warning]Falha na chamada ao Azure AI Foundry. AI Review ignorado."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        echo "Resposta do Foundry salva em /tmp/foundry_response.json."
+      displayName: 'Executar AI Review via Foundry v1'
+      env:
+        FOUNDRY_API_KEY: $(foundryApiKey)
+        FOUNDRY_ENDPOINT: $(foundryEndpoint)
+        FOUNDRY_MODEL: $(foundryModel)
+        DEBUG_MODE: $(DEBUG_MODE)
+
+    # ------------------------------------------------------
+    # 3. Preparar comentario geral e comentarios individuais
+    # ------------------------------------------------------
+    - bash: |
+        set -euo pipefail
+
+        if [ -f "/tmp/ai_review_status.env" ]; then
+          source /tmp/ai_review_status.env
+        fi
+
+        if [ "${AI_REVIEW_SKIPPED:-false}" = "true" ]; then
+          echo "AI Review ignorado por falha anterior."
+          exit 0
+        fi
+
+        if [ ! -f "/tmp/foundry_response.json" ]; then
+          echo "##vso[task.logissue type=warning]Arquivo /tmp/foundry_response.json nao encontrado. Comentarios nao serao gerados."
+          echo "AI_REVIEW_SKIPPED=true" > /tmp/ai_review_status.env
+          exit 0
+        fi
+
+        python3 - <<'PYEOF'
+        import json
+        import os
+        import re
+        from datetime import datetime, timezone
+
+        def extract_output_text(data):
+            text = data.get('output_text')
+            if text:
+                return text
+
+            output = data.get('output') or []
+            texts = []
+
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+
+                for content in item.get('content', []):
+                    if not isinstance(content, dict):
+                        continue
+
+                    value = content.get('text')
+                    if value:
+                        texts.append(value)
+
+            return '\n'.join(texts).strip()
+
+        def strip_code_fence(text):
+            text = text.strip()
+            text = re.sub(r'^```json\s*', '', text)
+            text = re.sub(r'^```\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+            return text.strip()
+
+        def to_str(value):
+            if value is None:
+                return ''
+            return str(value)
+
+        with open('/tmp/foundry_response.json', 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        raw_text = extract_output_text(data)
+
+        if not raw_text:
+            fallback_text = 'A IA respondeu, mas nao foi possivel extrair texto da resposta.'
+            review = {
+                'veredito': 'Indefinido',
+                'resumo': fallback_text,
+                'comentario_geral': fallback_text,
+                'problemas': []
+            }
+        else:
+            cleaned = strip_code_fence(raw_text)
+            try:
+                review = json.loads(cleaned)
+            except Exception:
+                review = {
+                    'veredito': 'Indefinido',
+                    'resumo': 'A IA respondeu, mas o retorno nao estava em JSON valido. O texto bruto foi incluido abaixo.',
+                    'comentario_geral': raw_text,
+                    'problemas': []
+                }
+
+        if not isinstance(review, dict):
+            review = {
+                'veredito': 'Indefinido',
+                'resumo': 'A IA retornou JSON valido, mas fora da estrutura esperada.',
+                'comentario_geral': raw_text or '',
+                'problemas': []
+            }
+
+        veredito = to_str(review.get('veredito') or 'Indefinido')
+        resumo = to_str(review.get('resumo') or '')
+        comentario_geral = to_str(review.get('comentario_geral') or '')
+        problemas = review.get('problemas') or []
+
+        if not isinstance(problemas, list):
+            problemas = []
+
+        with open('/tmp/truncation_warning.txt', 'r', encoding='utf-8', errors='replace') as f:
+            truncation_warning = f.read().strip()
+
+        generated_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+        geral = f'''## AI Code Review
+
+        **Veredito:** {veredito}
+
+        ### Resumo
+
+        {resumo}
+
+        ### Comentario geral
+
+        {comentario_geral}
+
+        ---
+
+        **Problemas identificados:** {len(problemas)}
+        **Modelo:** {os.environ.get('FOUNDRY_MODEL', 'Nao informado')}
+        **Gerado em:** {generated_at}
+        '''
+
+        if truncation_warning:
+            geral += f'\n> {truncation_warning}\n'
+
+        geral += '\n<!-- ai-review-v1:general -->\n'
+
+        max_general_size = 20000
+        if len(geral) > max_general_size:
+            geral = geral[:max_general_size] + '\n\n[Comentario geral truncado.]\n<!-- ai-review-v1:general -->\n'
+
+        general_thread = {
+            'comments': [
+                {
+                    'parentCommentId': 0,
+                    'content': geral,
+                    'commentType': 1
+                }
+            ],
+            'status': 1
+        }
+
+        problem_threads = []
+        max_problems = 20
+
+        for idx, p in enumerate(problemas[:max_problems], start=1):
+            if not isinstance(p, dict):
+                continue
+
+            severidade = to_str(p.get('severidade') or 'Nao classificado')
+            titulo = to_str(p.get('titulo') or f'Problema {idx}')
+            arquivo = p.get('arquivo')
+            linha = p.get('linha_aproximada')
+            descricao = to_str(p.get('descricao') or '')
+            risco = to_str(p.get('risco') or '')
+            sugestao = to_str(p.get('sugestao') or '')
+            comentario = to_str(p.get('comentario') or '')
+
+            content = f'''## Problema {idx}: {titulo}
+
+        **Severidade:** {severidade}
+
+        **Arquivo:** {arquivo or 'Nao identificado'}
+        **Linha aproximada:** {linha if linha is not None else 'Nao identificada'}
+
+        ### Descricao
+
+        {descricao}
+
+        ### Risco
+
+        {risco}
+
+        ### Sugestao
+
+        {sugestao}
+
+        ### Comentario da IA
+
+        {comentario}
+
+        <!-- ai-review-v1:problem:{idx} -->
+        '''
+
+            max_problem_size = 12000
+            if len(content) > max_problem_size:
+                content = content[:max_problem_size] + f'\n\n[Comentario do problema truncado.]\n<!-- ai-review-v1:problem:{idx} -->\n'
+
+            problem_threads.append({
+                'comments': [
+                    {
+                        'parentCommentId': 0,
+                        'content': content,
+                        'commentType': 1
+                    }
+                ],
+                'status': 1
+            })
+
+        with open('/tmp/general_comment_body.json', 'w', encoding='utf-8') as f:
+            json.dump(general_thread, f, ensure_ascii=False)
+
+        with open('/tmp/problem_threads.json', 'w', encoding='utf-8') as f:
+            json.dump(problem_threads, f, ensure_ascii=False)
+
+        print('Comentario geral gerado.')
+        print(f'Problemas estruturados gerados: {len(problem_threads)}')
+        PYEOF
+      displayName: 'Preparar comentarios estruturados'
+
+    # ------------------------------------------------------
+    # 4. Postar comentario geral e comentarios por problema
+    # ------------------------------------------------------
+    - bash: |
+        set -euo pipefail
+
+        HTTP_CODE="000"
+        CURL_EXIT=0
+
+        # Executa a chamada sem expor headers e mantem corpo e status separados.
+        curl_request() {
+          local request_name="$1"
+          local response_file="$2"
+          local expected_statuses="$3"
+          local request_ok="false"
+          shift 3
+
+          if HTTP_CODE=$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            "$@"); then
+            CURL_EXIT=0
+          else
+            CURL_EXIT=$?
+          fi
+
+          HTTP_CODE="${HTTP_CODE:-000}"
+
+          if [ "${CURL_EXIT}" -eq 0 ]; then
+            if [ "${expected_statuses}" = "2xx" ] && [[ "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
+              request_ok="true"
+            elif [[ " ${expected_statuses} " == *" ${HTTP_CODE} "* ]]; then
+              request_ok="true"
+            fi
+          fi
+
+          echo "Chamada: ${request_name}"
+          echo "Codigo HTTP: ${HTTP_CODE}"
+
+          if [[ "${DEBUG_MODE,,}" == "true" || "${request_ok}" != "true" ]]; then
+            echo "##[group]Corpo da resposta - ${request_name}"
+            if [ -s "${response_file}" ]; then
+              cat "${response_file}"
+              echo
+            else
+              echo "(vazio)"
+            fi
+            echo "##[endgroup]"
+          fi
+
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            echo "Falha de transporte do curl (codigo ${CURL_EXIT})."
+            return "${CURL_EXIT}"
+          fi
+
+          if [ "${request_ok}" != "true" ]; then
+            echo "A chamada retornou um status HTTP inesperado."
+            return 1
+          fi
+
+          return 0
+        }
+
+        if [ -f "/tmp/ai_review_status.env" ]; then
+          source /tmp/ai_review_status.env
+        fi
+
+        if [ "${AI_REVIEW_SKIPPED:-false}" = "true" ]; then
+          echo "AI Review ignorado. Nenhum comentario sera postado."
+          exit 0
+        fi
+
+        if [ -z "${SYSTEM_ACCESSTOKEN:-}" ]; then
+          echo "##vso[task.logissue type=warning]SYSTEM_ACCESSTOKEN nao disponivel. Comentarios nao serao postados."
+          exit 0
+        fi
+
+        THREADS_URL="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_apis/git/repositories/${BUILD_REPOSITORY_ID}/pullRequests/${SYSTEM_PULLREQUEST_PULLREQUESTID}/threads?api-version=7.1"
+
+        if [[ "${DEBUG_MODE,,}" == "true" ]]; then
+          echo "##[group]Diagnostico Azure DevOps Pull Request"
+          echo "DEBUG_MODE=${DEBUG_MODE}"
+          echo "SYSTEM_TEAMFOUNDATIONCOLLECTIONURI=${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+          echo "SYSTEM_TEAMPROJECT=${SYSTEM_TEAMPROJECT}"
+          echo "BUILD_REPOSITORY_ID=${BUILD_REPOSITORY_ID}"
+          echo "SYSTEM_PULLREQUEST_PULLREQUESTID=${SYSTEM_PULLREQUEST_PULLREQUESTID}"
+          echo "URL montada=${THREADS_URL}"
+          echo "Tamanho do System.AccessToken=${#SYSTEM_ACCESSTOKEN}"
+
+          if ! curl_request "Identidade autenticada no Azure DevOps" "/tmp/azure-devops-connection.json" "2xx" \
+            --max-time 10 \
+            --connect-timeout 5 \
+            --request GET "${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}_apis/connectionData?connectOptions=1&lastChangeId=-1&lastChangeId64=-1" \
+            --header "Accept: application/json" \
+            --header "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}"; then
+            echo "A consulta de identidade falhou, mas o diagnostico nao e bloqueante."
+          fi
+          echo "##[endgroup]"
+        fi
+
+        COUNT=$(python3 - <<'PYEOF'
+        import json
+        with open("/tmp/problem_threads.json", "r", encoding="utf-8") as f:
+            threads = json.load(f)
+        print(len(threads))
+        PYEOF
+        )
+
+        echo "Quantidade de comentarios de problemas: ${COUNT}"
+
+        if [ "${COUNT}" != "0" ]; then
+          echo "Postando comentarios individuais por problema primeiro..."
+
+          for i in $(seq 0 $((COUNT - 1))); do
+            python3 - <<PYEOF
+        import json
+
+        index = ${i}
+
+        with open("/tmp/problem_threads.json", "r", encoding="utf-8") as f:
+            threads = json.load(f)
+
+        with open(f"/tmp/problem_comment_{index}.json", "w", encoding="utf-8") as f:
+            json.dump(threads[index], f, ensure_ascii=False)
+        PYEOF
+
+            echo "Postando problema $((i + 1))..."
+
+            if ! curl_request "Comentario do problema $((i + 1))" "/tmp/problem_comment_response_${i}.json" "200 201" \
+              --request POST "${THREADS_URL}" \
+              --header "Content-Type: application/json; charset=utf-8" \
+              --header "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
+              --data @/tmp/problem_comment_${i}.json; then
+              if [ "${CURL_EXIT}" -ne 0 ]; then
+                exit "${CURL_EXIT}"
+              fi
+              echo "##vso[task.logissue type=warning]Falha ao postar comentario do problema $((i + 1))."
+            fi
+          done
+        else
+          echo "Nenhum problema individual para postar."
+        fi
+
+        echo "Postando comentario geral/veredito por ultimo..."
+
+        if ! curl_request "Comentario geral" "/tmp/general_comment_response.json" "200 201" \
+          --request POST "${THREADS_URL}" \
+          --header "Content-Type: application/json; charset=utf-8" \
+          --header "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
+          --data @/tmp/general_comment_body.json; then
+          if [ "${CURL_EXIT}" -ne 0 ]; then
+            exit "${CURL_EXIT}"
+          fi
+          echo "##vso[task.logissue type=warning]Falha ao postar comentario geral/veredito."
+          exit 0
+        fi
+
+        echo "Comentarios postados. Veredito foi postado por ultimo."
+      displayName: 'Postar comentarios estruturados na PR'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        DEBUG_MODE: $(DEBUG_MODE)

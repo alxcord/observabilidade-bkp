@@ -1,0 +1,19 @@
+# hub-schema-init/azure-pipelines.yml
+#
+# Dispara quando este projeto muda (o DDL está em schema_definition.py, sem
+# arquivo .sql). O job é
+# manual (não tem agenda): a esteira só publica a imagem e atualiza a
+# definição; quem decide quando aplicar o schema é uma pessoa.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - src/hub-schema-init/*
+
+extends:
+  template: ../templates/test-build-push-deploy.yml
+  parameters:
+    projectPath: src/hub-schema-init
+    imageName: hub-schema-init

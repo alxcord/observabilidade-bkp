@@ -1,0 +1,79 @@
+bundle:
+  name: vc-observability
+
+include:
+  - resources/*.yml
+
+artifacts:
+  default:
+    type: whl
+    path: .
+    build: python -m pip wheel . --no-deps --wheel-dir dist
+
+variables:
+  lineage_catalog:
+    description: Catálogo opcional examinado pelo reconciliador; vazio inclui todos os catálogos permitidos.
+    default: ''
+  lineage_schema:
+    description: Schema opcional examinado pelo reconciliador; vazio inclui todos os schemas permitidos.
+    default: ''
+  lineage_default_source_schema:
+    description: Schema externo usado quando a tag vc_source_object não estiver qualificada.
+    default: '3_INTEGRACAO'
+  ambiente:
+    description: Valor da tag de custo AMBIENTE (DEV ou PRD); definido por target.
+    default: DEV
+  run_as_service_principal:
+    description: >-
+      Service principal que executa os jobs. O lookup resolve o nome de exibição
+      na workspace para o Application ID, formato exigido por run_as.
+    lookup:
+      service_principal: VC_OWNER_SERVICE
+
+# O host do workspace nao e declarado aqui: o pipeline de CI/CD injeta
+# DATABRICKS_HOST por ambiente (.azuredevops/templates/databricks-bundle-deploy.yml).
+# Rodando localmente, exporte DATABRICKS_HOST ou use um profile.
+workspace:
+  # Pasta unica dos bundles deste repositorio. ${bundle.name} evita que duas
+  # solucoes de solutions/* gravem files/ e state/ na mesma pasta.
+  #
+  # Sem ${bundle.target} no caminho de proposito: o caminho e o mesmo em dev e
+  # em prd, que sao workspaces distintas. Dois targets implantados na mesma
+  # workspace passariam a disputar o mesmo state, entao um novo target exige
+  # ou uma workspace propria ou a volta do sufixo.
+  #
+  # Fora de /Workspace/Users/<SP de deploy>: aquela pasta e privada da
+  # identidade que implanta, e a run_as nao conseguiria ler o python_file nem
+  # a wheel das tasks. Fora de /Workspace/Shared, cuja ACL nao da para
+  # restringir. Fora da git folder (/Workspace/Repos/...) de proposito: o
+  # deploy grava files/ e state/ no root_path, e isso sujaria o checkout
+  # atualizado pelo CI.
+  #
+  # A pasta /Workspace/.bundle precisa ser criada por um admin da workspace,
+  # com CAN_MANAGE para a SP de deploy e CAN_READ para a run_as.
+  root_path: /Workspace/.bundle/platform/${bundle.name}
+
+# Identidade de execucao dos jobs, separada da identidade de deploy
+# (sp-vc-dbx-cicd-dev / -prod). A SP de CI/CD apenas implanta; quem cria o
+# cluster e le os dados e a run_as. A SP de deploy precisa de CAN_USE sobre
+# esta service principal.
+run_as:
+  service_principal_name: ${var.run_as_service_principal}
+
+targets:
+  dev:
+    default: true
+    # Sem `mode: development`: aquele modo prefixa o nome dos recursos com
+    # "[dev <usuario do deploy>]" e exige root_path dentro da pasta do usuario
+    # ("root_path must start with '~/' or contain the current username").
+    # Os defaults do modo que interessam ficam explicitos em presets.
+    presets:
+      trigger_pause_status: PAUSED
+      pipelines_development: true
+    variables:
+      ambiente: DEV
+
+  prd:
+    mode: production
+    variables:
+      ambiente: PRD

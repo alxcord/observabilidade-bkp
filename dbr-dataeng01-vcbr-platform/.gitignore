@@ -1,0 +1,24 @@
+**pycache**/
+*.py[cod]
+.venv/
+tmp*/
+test-tmp-*/
+
+# Testes e análise Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# BMAD — arquivos pessoais e temporários - não necessários
+**/_bmad/config.user.toml
+**/_bmad/custom/*.user.toml
+**/_bmad/**/*.bak
+**/_bmad/render/
+
+# UV — remova esta linha caso queira versionar o lockfile
+/modules/vc_extractor_engine_v3/uv.lock

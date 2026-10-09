@@ -1,0 +1,8 @@
+# Ativos monitorados: sobrescrita das tags do Unity Catalog, campo a campo.
+#
+# Lido pelo asset_observability (e pelo schema_observability). O formato de
+# cada item está em docs/Especs/40-Configuracao-YAML.md, seção 4.
+#
+# Lista vazia: nenhuma sobrescrita, valem só as tags.
+
+assets: []

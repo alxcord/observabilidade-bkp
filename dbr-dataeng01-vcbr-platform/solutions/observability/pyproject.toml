@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vc-observability"
+version = "0.1.0"
+description = "Componentes de observabilidade da plataforma de dados VCBR"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "databricks-sdk==0.106.0",
+]
+
+[project.scripts]
+reconcile_custom_lineage = "vc_observability.lineage.reconciler:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

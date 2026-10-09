@@ -1,0 +1,258 @@
+# azure-pipelines-develop-ci.yml
+# Atualiza o Git folder protegido na workspace Databricks de desenvolvimento
+# apos push/merge na branch Develop.
+#
+# Configuracao externa necessaria:
+#   - Service Connection: sc-vc-dbx-cicd-dev
+#   - Variavel do pipeline: repoid (Repo ID da workspace DEV)
+#   - Service Principal adicionada a workspace e com permissao no Git folder
+
+parameters:
+- name: deployAllBundles
+  displayName: 'Implantar todos os bundles (ignora o diff)'
+  type: boolean
+  default: false
+- name: baseSha
+  displayName: 'Commit base do diff (opcional)'
+  type: string
+  default: ' '
+
+trigger:
+  branches:
+    include:
+      - Develop
+
+pr: none
+
+variables:
+  DATABRICKS_HOST: 'https://adb-1886204700223023.3.azuredatabricks.net'
+  REPO_BRANCH: 'Develop'
+  EXPECTED_REPO_URL: 'https://grupovotorantim.visualstudio.com/VC-ANALYTICS/_git/dbr-dataeng01-vcbr-platform'
+  DEBUG_MODE: 'false'
+  # Tentativas da validacao e da atualizacao do Git folder em caso de falha
+  # transitoria, e espera entre elas.
+  RETRY_MAX_ATTEMPTS: '3'
+  RETRY_DELAY_SECONDS: '20'
+
+pool:
+  # Imagem fixa: o label ubuntu-latest migra para Ubuntu 26.04 entre
+  # 19/10/2026 e 19/11/2026. Fixar evita a troca silenciosa do agente.
+  vmImage: ubuntu-24.04
+
+stages:
+- stage: DatabricksUpdate
+  displayName: 'Atualizar Databricks DEV'
+
+  jobs:
+  - job: UpdateJob
+    displayName: 'Atualizar Git folder protegido'
+
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Atualizar Git folder na branch Develop'
+      inputs:
+        azureSubscription: 'sc-vc-dbx-cicd-dev'
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+
+          LAST_HTTP_CODE="000"
+          response_dir=$(mktemp -d)
+          trap 'rm -rf "${response_dir}"' EXIT
+
+          # Executa a chamada sem expor headers e mantem corpo e status separados.
+          curl_request() {
+            local request_name="$1"
+            local response_file="$2"
+            local http_code
+            local curl_exit
+            shift 2
+
+            if http_code=$(curl --silent --show-error \
+              --output "${response_file}" \
+              --write-out '%{http_code}' \
+              "$@"); then
+              curl_exit=0
+            else
+              curl_exit=$?
+            fi
+
+            echo "Chamada: ${request_name}"
+            LAST_HTTP_CODE="${http_code:-000}"
+            echo "Codigo HTTP: ${LAST_HTTP_CODE}"
+            echo "Corpo da resposta:"
+            if [ -s "${response_file}" ]; then
+              cat "${response_file}"
+              echo
+            else
+              echo "(vazio)"
+            fi
+
+            if [ "${curl_exit}" -ne 0 ]; then
+              echo "Falha de transporte do curl (codigo ${curl_exit})."
+              return "${curl_exit}"
+            fi
+
+            if [[ ! "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+              echo "A chamada retornou um status HTTP fora da faixa 2xx."
+              return 1
+            fi
+
+            return 0
+          }
+
+          # Repete a chamada ate RETRY_MAX_ATTEMPTS vezes, com espera entre as
+          # tentativas. Nao repete quando o Git folder nao existe (HTTP 404),
+          # que e erro de configuracao e nao falha transitoria.
+          with_retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "${LAST_HTTP_CODE}" = "404" ]; then
+                echo "O recurso nao foi encontrado (HTTP 404); nao adianta tentar de novo."
+                return 1
+              fi
+              if [ "${attempt}" -ge "${RETRY_MAX_ATTEMPTS}" ]; then
+                echo "Esgotadas as ${RETRY_MAX_ATTEMPTS} tentativas."
+                return 1
+              fi
+              echo "##vso[task.logissue type=warning]Tentativa ${attempt} de ${RETRY_MAX_ATTEMPTS} falhou. Nova tentativa em ${RETRY_DELAY_SECONDS}s."
+              sleep "${RETRY_DELAY_SECONDS}"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          get_access_token() {
+            az account get-access-token \
+              --resource 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d \
+              --query accessToken \
+              --output tsv
+          }
+
+          # Chamada ao Git folder com token novo a cada tentativa, para que uma
+          # falha por token expirado ou ainda nao propagado tambem seja refeita.
+          git_folder_call() {
+            local request_name="$1"
+            local response_file="$2"
+            local method="$3"
+            local body="${4:-}"
+            local args
+
+            access_token=$(get_access_token) || return 1
+            args=(--request "${method}" "${api_url}" \
+              --header "Accept: application/json" \
+              --header "Authorization: Bearer ${access_token}")
+            if [ -n "${body}" ]; then
+              args+=(--header "Content-Type: application/json" --data "${body}")
+            fi
+            curl_request "${request_name}" "${response_file}" "${args[@]}"
+          }
+
+          if [[ ! "${ENV_REPOID}" =~ ^[0-9]+$ ]]; then
+            echo "##vso[task.logissue type=error]A variavel repoid nao foi definida ou nao e um Repo ID numerico valido."
+            exit 1
+          fi
+
+          echo "Obtendo token temporario para a Service Principal..."
+          access_token=$(get_access_token)
+
+          if [ -z "${access_token}" ]; then
+            echo "##vso[task.logissue type=error]Nao foi possivel obter o token do Azure Databricks."
+            exit 1
+          fi
+
+          api_url="${DATABRICKS_HOST%/}/api/2.0/repos/${ENV_REPOID}"
+
+          if [[ "${DEBUG_MODE,,}" == "true" ]]; then
+            echo "##[group]Diagnostico Databricks"
+            echo "DEBUG_MODE=${DEBUG_MODE}"
+            echo "ENV_REPOID=${ENV_REPOID}"
+            echo "DATABRICKS_HOST=${DATABRICKS_HOST}"
+            echo "REPO_BRANCH=${REPO_BRANCH}"
+            echo "EXPECTED_REPO_URL=${EXPECTED_REPO_URL}"
+            echo "URL montada=${api_url}"
+            echo "Tamanho do token=${#access_token}"
+
+            echo "Identidade autenticada:"
+            if ! az account show \
+              --query '{name:user.name,type:user.type}' \
+              --output json; then
+              echo "Nao foi possivel consultar a identidade autenticada."
+            fi
+
+            # As chamadas deste bloco sao informativas e nao interrompem o pipeline.
+            if ! curl_request "IP publico de saida" "${response_dir}/public-ip.json" \
+              --max-time 5 \
+              --connect-timeout 3 \
+              --request GET "https://api.ipify.org?format=json" \
+              --header "Accept: application/json"; then
+              echo "Nao foi possivel obter o IP publico de saida."
+            fi
+
+            if ! curl_request "Identidade Databricks (SCIM Me)" "${response_dir}/scim-me.json" \
+              --request GET "${DATABRICKS_HOST%/}/api/2.0/preview/scim/v2/Me" \
+              --header "Accept: application/json" \
+              --header "Authorization: Bearer ${access_token}"; then
+              echo "A consulta SCIM Me falhou, mas o diagnostico nao e bloqueante."
+            fi
+
+            if ! curl_request "Git folders visiveis" "${response_dir}/repos.json" \
+              --request GET "${DATABRICKS_HOST%/}/api/2.0/repos" \
+              --header "Accept: application/json" \
+              --header "Authorization: Bearer ${access_token}"; then
+              echo "A listagem de Git folders falhou, mas o diagnostico nao e bloqueante."
+            fi
+            echo "##[endgroup]"
+          fi
+
+          echo "Validando o Repo ID antes da atualizacao..."
+          repo_response_file="${response_dir}/repo-get.json"
+          if ! with_retry git_folder_call "Validacao do Git folder" "${repo_response_file}" GET; then
+            echo "##vso[task.logissue type=error]Nao foi possivel validar o Git folder no Databricks."
+            exit 1
+          fi
+
+          repo_json=$(<"${repo_response_file}")
+
+          actual_url=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("url", ""))' <<< "${repo_json}")
+          current_branch=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("branch", ""))' <<< "${repo_json}")
+
+          if [ "${actual_url%/}" != "${EXPECTED_REPO_URL%/}" ]; then
+            echo "##vso[task.logissue type=error]O Repo ID aponta para '${actual_url}', mas era esperado '${EXPECTED_REPO_URL}'."
+            exit 1
+          fi
+
+          echo "Repositorio validado: ${actual_url}"
+          echo "Branch atual: ${current_branch:-nao informada}"
+          echo "Atualizando para a branch ${REPO_BRANCH}..."
+
+          payload=$(printf '{"branch":"%s"}' "${REPO_BRANCH}")
+
+          if ! with_retry git_folder_call "Atualizacao da branch do Git folder" "${response_dir}/repo-patch.json" PATCH "${payload}"; then
+            echo "##vso[task.logissue type=error]Nao foi possivel atualizar a branch do Git folder no Databricks."
+            exit 1
+          fi
+
+          echo
+          echo "Git folder DEV atualizado com sucesso."
+      env:
+        ENV_REPOID: $(repoid)
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        REPO_BRANCH: $(REPO_BRANCH)
+        EXPECTED_REPO_URL: $(EXPECTED_REPO_URL)
+        DEBUG_MODE: $(DEBUG_MODE)
+        RETRY_MAX_ATTEMPTS: $(RETRY_MAX_ATTEMPTS)
+        RETRY_DELAY_SECONDS: $(RETRY_DELAY_SECONDS)
+
+- stage: DatabricksBundles
+  displayName: 'Deploy dos bundles alterados (DEV)'
+  dependsOn: DatabricksUpdate
+  condition: succeeded()
+
+  jobs:
+  - template: /.azuredevops/templates/databricks-bundle-deploy.yml
+    parameters:
+      environment: dev
+      forceAll: ${{ parameters.deployAllBundles }}
+      baseSha: ${{ trim(parameters.baseSha) }}
+      debugMode: $(DEBUG_MODE)

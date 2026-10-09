@@ -1,0 +1,141 @@
+# templates/test-build-push-deploy.yml
+#
+# Esteira compartilhada por todos os projetos de container deste repositório.
+# Cada projeto referencia este template passando projectPath e imageName; a
+# lógica de teste, build e deploy fica num lugar só.
+#
+# A imagem é construída UMA vez e a mesma tag ($(Build.BuildId)) é promovida
+# de dev para prod. Sem rebuild entre ambientes: o que foi testado é o que sobe.
+
+parameters:
+  - name: projectPath
+  - name: imageName
+  # Raiz do build do Docker. Precisa ser o repositório inteiro (e não
+  # projectPath, o padrão) quando o Dockerfile do projeto copia algo de
+  # fora da própria pasta — por exemplo, um YAML de config/ compartilhado
+  # entre vários projetos, que não pode ser duplicado dentro de cada um.
+  - name: buildContext
+    default: ${{ parameters.projectPath }}
+
+stages:
+  # ---------------------------------------------------------------
+  # STAGE 1 - TEST
+  # Falha se a pasta tests/ não existir. É deliberado: um projeto sem
+  # testes não entra na esteira, e isso é verificado antes de qualquer
+  # instalação de dependência, para falhar rápido e barato.
+  # ---------------------------------------------------------------
+  - stage: Test
+    jobs:
+      - job: RunTests
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              if [ ! -d "${{ parameters.projectPath }}/tests" ]; then
+                echo "##vso[task.logissue type=error]Pasta 'tests/' não encontrada em ${{ parameters.projectPath }}. Todo projeto precisa ter testes."
+                exit 1
+              fi
+            displayName: 'Validar existência da pasta tests/'
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+
+          - script: |
+              cd ${{ parameters.projectPath }}
+              pip install -r requirements.txt
+              pip install -r requirements-dev.txt
+            displayName: 'Instalar dependências'
+
+          - script: |
+              cd ${{ parameters.projectPath }}
+              pytest tests/ --junitxml=test-results.xml
+            displayName: 'Rodar testes'
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: '${{ parameters.projectPath }}/test-results.xml'
+              testRunTitle: '${{ parameters.imageName }}'
+
+  # ---------------------------------------------------------------
+  # STAGE 2 - BUILD
+  # Uma imagem, uma tag, promovida sem rebuild entre ambientes.
+  # ---------------------------------------------------------------
+  - stage: Build
+    dependsOn: Test
+    condition: succeeded()
+    jobs:
+      - job: BuildPush
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Docker@2
+            inputs:
+              containerRegistry: 'acr-observabilidade-connection'
+              repository: ${{ parameters.imageName }}
+              command: 'buildAndPush'
+              Dockerfile: '${{ parameters.projectPath }}/Dockerfile'
+              buildContext: '${{ parameters.buildContext }}'
+              tags: '$(Build.BuildId)'
+
+  # ---------------------------------------------------------------
+  # STAGE 3 - DEPLOY DEV
+  # Environment "dev" no Azure DevOps, sem approval gate.
+  # ---------------------------------------------------------------
+  - stage: DeployDev
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployDev
+        environment: 'dev'
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-dev'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group create \
+                        --resource-group rg-analytics-dev-vcbr \
+                        --template-file ${{ parameters.projectPath }}/infra/main.bicep \
+                        --parameters ${{ parameters.projectPath }}/infra/params.json \
+                        --parameters jobName=${{ parameters.imageName }}-dev \
+                        --parameters environment=dev \
+                        --parameters imageTag=$(Build.BuildId)
+
+  # ---------------------------------------------------------------
+  # STAGE 4 - DEPLOY PROD
+  # Environment "prod" com approval gate configurado em
+  # Pipelines > Environments > prod > Approvals and checks.
+  # ---------------------------------------------------------------
+  - stage: DeployProd
+    dependsOn: DeployDev
+    condition: succeeded()
+    jobs:
+      - deployment: DeployProd
+        environment: 'prod'
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-prod'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group create \
+                        --resource-group rg-analytics-vcbr \
+                        --template-file ${{ parameters.projectPath }}/infra/main.bicep \
+                        --parameters ${{ parameters.projectPath }}/infra/params.json \
+                        --parameters jobName=${{ parameters.imageName }}-prod \
+                        --parameters environment=prod \
+                        --parameters imageTag=$(Build.BuildId)

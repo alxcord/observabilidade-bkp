@@ -1,0 +1,106 @@
+<mxfile host="Electron">
+  <diagram name="DEV e PRD" id="0">
+    <mxGraphModel dx="632" dy="454" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1540" pageHeight="1340" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="v2" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;fillColor=none;strokeColor=none;fontSize=18;fontStyle=1;align=left;" value="Rede da solução de Observabilidade VCBR, ambiente DEV" vertex="1">
+          <mxGeometry height="40" width="1140" x="20" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="v3" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fillColor=#F5F5F5;strokeColor=#666666;arcSize=7;" value="Datacenter TIVIT" vertex="1">
+          <mxGeometry height="420" width="260" x="20" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="v4" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;fillColor=#FFF2CC;strokeColor=#D6B656;" value="Gateway Power BI&lt;br&gt;BRSAOWVAPP22VC&lt;br&gt;10.0.6.172" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="v5" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fillColor=#EAF3FB;strokeColor=#0078D4;strokeWidth=2;arcSize=4;" value="VNET-VC-OBSERVABILITY 10.248.176.0/24&lt;br&gt;faixa DEV" vertex="1">
+          <mxGeometry height="560" width="460" x="330" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="v6" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;" value="SUBNET-OBSERVABILITY-CAE-DEV  10.248.176.0/27&lt;br&gt;Container Apps cae-observ-dev-vcbr&lt;br&gt;Jobs: coletor, sync_expectations, hub_publisher, hub_replication" vertex="1">
+          <mxGeometry height="90" width="400" x="360" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="v7" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;fillColor=#E1F0E1;strokeColor=#82B366;" value="SUBNET-OBSERVABILITY-SQL-DEV  10.248.176.64/28&lt;br&gt;Private Endpoint pe-sqlsrv-observ-dev-vcbr&lt;br&gt;Azure SQL db-observ-dev-vcbr" vertex="1">
+          <mxGeometry height="80" width="400" x="360" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="v8" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;" value="SUBNET-OBSERVABILITY-AF-DEV  10.248.176.32/27&lt;br&gt;Function App AF-OBSERV-DEV-VCBR (API CRUD)" vertex="1">
+          <mxGeometry height="80" width="400" x="360" y="350" as="geometry" />
+        </mxCell>
+        <mxCell id="v9" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;fillColor=#E1F0E1;strokeColor=#82B366;" value="SUBNET-OBSERVABILITY-ST-DEV  10.248.176.80/28&lt;br&gt;Private Endpoint Storage stobservdevvcbr" vertex="1">
+          <mxGeometry height="70" width="400" x="360" y="450" as="geometry" />
+        </mxCell>
+        <mxCell id="v10" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;strokeColor=#999999;dashed=1;fontColor=#666666;" value="Reserva  10.248.176.96/27" vertex="1">
+          <mxGeometry height="50" width="400" x="360" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="v11" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fillColor=#F5F5F5;strokeColor=#666666;arcSize=6;" value="Serviços Azure (saída HTTPS 443)&lt;br&gt;&lt;br&gt;• Databricks dbr-dataeng01-dev-vcbr&lt;br&gt;• Log Analytics LA-ANALYTICS-DEV-VCBR&lt;br&gt;• Container Registry cranalyticsvcbr&lt;br&gt;• Key Vault KV-DEV-ANALYTICS-VCBR&lt;br&gt;• Entra ID (Managed Identity)&lt;br&gt;• Microsoft Teams (notificações)" vertex="1">
+          <mxGeometry height="300" width="320" x="840" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="v12" edge="1" parent="1" source="v4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#B85450;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="v7" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="v13" edge="1" parent="1" source="v6" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#0078D4;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="v11" value="HTTPS 443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="v14" edge="1" parent="1" source="v6" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="v7" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="v15" edge="1" parent="1" source="v8" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="v7" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="v16" edge="1" parent="1" source="v8" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="v9" value="HTTPS 443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="v17" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;verticalAlign=top;spacingLeft=8;fontSize=11;fillColor=#FFFFFF;strokeColor=#999999;" value="Legenda&lt;br&gt;Vermelho: rede corporativa até a Azure (firewall + DNS corporativo)&lt;br&gt;Verde: tráfego interno da VNET&lt;br&gt;Azul: saída para serviços Azure" vertex="1">
+          <mxGeometry height="120" width="260" x="20" y="520" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-1" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;fillColor=none;strokeColor=none;fontSize=18;fontStyle=1;align=left;" value="Rede da solução de Observabilidade VCBR, ambiente PRD" vertex="1">
+          <mxGeometry height="40" width="1140" x="20" y="695" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-2" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fillColor=#F5F5F5;strokeColor=#666666;arcSize=5;" value="Datacenter TIVIT" vertex="1">
+          <mxGeometry height="420" width="260" x="20" y="755" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-3" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;fillColor=#FFF2CC;strokeColor=#D6B656;" value="Gateway Power BI&lt;br&gt;BRSAOWVAPP22VC&lt;br&gt;10.0.6.172" vertex="1">
+          <mxGeometry height="80" width="220" x="40" y="925" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-4" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fillColor=#EAF3FB;strokeColor=#0078D4;strokeWidth=2;arcSize=4;" value="VNET-VC-OBSERVABILITY 10.248.176.0/24&lt;br&gt;faixa PRD" vertex="1">
+          <mxGeometry height="560" width="460" x="330" y="755" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-5" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;" value="SUBNET-OBSERVABILITY-CAE-PRD  10.248.176.128/27&lt;br&gt;Container Apps cae-observ-vcbr&lt;br&gt;Jobs: coletor, sync_expectations, hub_publisher, hub_replication" vertex="1">
+          <mxGeometry height="90" width="400" x="360" y="815" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-6" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;fillColor=#E1F0E1;strokeColor=#82B366;" value="SUBNET-OBSERVABILITY-SQL-PRD  10.248.176.192/28&lt;br&gt;Private Endpoint pe-sqlsrv-observ-vcbr&lt;br&gt;Azure SQL db-observ-vcbr" vertex="1">
+          <mxGeometry height="80" width="400" x="360" y="925" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-7" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;" value="SUBNET-OBSERVABILITY-AF-PRD  10.248.176.160/27&lt;br&gt;Function App AF-OBSERV-VCBR (API CRUD)" vertex="1">
+          <mxGeometry height="80" width="400" x="360" y="1025" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-8" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;fillColor=#E1F0E1;strokeColor=#82B366;" value="SUBNET-OBSERVABILITY-ST-PRD  10.248.176.208/28&lt;br&gt;Private Endpoint Storage stobservvcbr" vertex="1">
+          <mxGeometry height="70" width="400" x="360" y="1125" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-9" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;spacingLeft=8;fillColor=#FFFFFF;strokeColor=#0078D4;strokeColor=#999999;dashed=1;fontColor=#666666;" value="Reserva  10.248.176.224/27" vertex="1">
+          <mxGeometry height="50" width="400" x="360" y="1215" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-10" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fillColor=#F5F5F5;strokeColor=#666666;arcSize=6;" value="Serviços Azure (saída HTTPS 443)&lt;br&gt;&lt;br&gt;• Databricks dbr-dataeng01-vcbr&lt;br&gt;• Log Analytics LA-ANALYTICS-VCBR&lt;br&gt;• Container Registry cranalyticsvcbr&lt;br&gt;• Key Vault KV-ANALYTICS-VCBR&lt;br&gt;• Entra ID (Managed Identity)&lt;br&gt;• Microsoft Teams (notificações)" vertex="1">
+          <mxGeometry height="300" width="320" x="840" y="755" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-11" edge="1" parent="1" source="ZpkIhXnUa3UjlWESDhhu-3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#B85450;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="ZpkIhXnUa3UjlWESDhhu-6" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-12" edge="1" parent="1" source="ZpkIhXnUa3UjlWESDhhu-5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#0078D4;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="ZpkIhXnUa3UjlWESDhhu-10" value="HTTPS 443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-13" edge="1" parent="1" source="ZpkIhXnUa3UjlWESDhhu-5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="ZpkIhXnUa3UjlWESDhhu-6" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-14" edge="1" parent="1" source="ZpkIhXnUa3UjlWESDhhu-7" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="ZpkIhXnUa3UjlWESDhhu-6" value="TCP 1433">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-15" edge="1" parent="1" source="ZpkIhXnUa3UjlWESDhhu-7" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeWidth=2;strokeColor=#82B366;fontSize=11;fontStyle=1;labelBackgroundColor=#ffffff;endArrow=block;" target="ZpkIhXnUa3UjlWESDhhu-8" value="HTTPS 443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZpkIhXnUa3UjlWESDhhu-16" parent="1" style="whiteSpace=wrap;html=1;rounded=1;fontSize=12;align=left;verticalAlign=top;spacingLeft=8;fontSize=11;fillColor=#FFFFFF;strokeColor=#999999;" value="Legenda&lt;br&gt;Vermelho: rede corporativa até a Azure (firewall + DNS corporativo)&lt;br&gt;Verde: tráfego interno da VNET&lt;br&gt;Azul: saída para serviços Azure" vertex="1">
+          <mxGeometry height="120" width="260" x="20" y="1195" as="geometry" />
+        </mxCell>
+      <mxCell id="note1" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 1. Saída da subnet CAE-DEV&lt;/b&gt;&lt;br&gt;TCP 443 para adb-1886204700223023.3.azuredatabricks.net (ou service tag AzureDatabricks)&lt;br&gt;TCP 443 para login.microsoftonline.com, cranalyticsvcbr.azurecr.io, Key Vault e api.loganalytics.io&lt;br&gt;TCP 1433 para o PE do SQL (interno à VNET)" vertex="1"><mxGeometry x="1190" y="80" width="330" height="120" as="geometry" /></mxCell><mxCell id="note1l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note1" target="v6"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note2" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 2. Saída da subnet AF-DEV&lt;/b&gt;&lt;br&gt;TCP 1433 para o PE do SQL e TCP 443 para o PE do Storage (internos à VNET)&lt;br&gt;TCP 443 para login.microsoftonline.com&lt;br&gt;Sem acesso ao Databricks&lt;br&gt;Entrada da API: a definir conforme consumidor" vertex="1"><mxGeometry x="1190" y="215" width="330" height="110" as="geometry" /></mxCell><mxCell id="note2l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note2" target="v8"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note3" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 3. Entrada na subnet SQL-DEV&lt;/b&gt;&lt;br&gt;Origem BRSAOWVAPP22VC (10.0.6.172), destino 10.248.176.64/28, TCP 1433&lt;br&gt;Substitui 10.248.164.128/27 e 10.248.165.128/27&lt;br&gt;Registro A no DNS corporativo para sqlsrv-observ-dev-vcbr" vertex="1"><mxGeometry x="1190" y="340" width="330" height="100" as="geometry" /></mxCell><mxCell id="note3l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note3" target="v7"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note4" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 4. Opcional&lt;/b&gt;&lt;br&gt;Se usar Cloud Fetch ou EXTERNAL_LINKS, liberar *.blob.core.windows.net TCP 443. Alternativa: disposition INLINE" vertex="1"><mxGeometry x="1190" y="455" width="330" height="80" as="geometry" /></mxCell><mxCell id="note4l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note4" target="v11"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note5" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 1. Saída da subnet CAE-PRD&lt;/b&gt;&lt;br&gt;TCP 443 para adb-6114343631149730.10.azuredatabricks.net (ou service tag AzureDatabricks)&lt;br&gt;TCP 443 para login.microsoftonline.com, cranalyticsvcbr.azurecr.io, Key Vault e api.loganalytics.io&lt;br&gt;TCP 1433 para o PE do SQL (interno à VNET)" vertex="1"><mxGeometry x="1190" y="755" width="330" height="120" as="geometry" /></mxCell><mxCell id="note5l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note5" target="ZpkIhXnUa3UjlWESDhhu-5"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note6" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 2. Saída da subnet AF-PRD&lt;/b&gt;&lt;br&gt;TCP 1433 para o PE do SQL e TCP 443 para o PE do Storage (internos à VNET)&lt;br&gt;TCP 443 para login.microsoftonline.com&lt;br&gt;Sem acesso ao Databricks&lt;br&gt;Entrada da API: a definir conforme consumidor" vertex="1"><mxGeometry x="1190" y="890" width="330" height="110" as="geometry" /></mxCell><mxCell id="note6l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note6" target="ZpkIhXnUa3UjlWESDhhu-7"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note7" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 3. Entrada na subnet SQL-PRD&lt;/b&gt;&lt;br&gt;Origem BRSAOWVAPP22VC (10.0.6.172), destino 10.248.176.192/28, TCP 1433&lt;br&gt;Substitui 10.248.164.128/27 e 10.248.165.128/27&lt;br&gt;Registro A no DNS corporativo para sqlsrv-observ-vcbr" vertex="1"><mxGeometry x="1190" y="1015" width="330" height="100" as="geometry" /></mxCell><mxCell id="note7l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note7" target="ZpkIhXnUa3UjlWESDhhu-6"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="note8" parent="1" style="shape=note;whiteSpace=wrap;html=1;size=14;align=left;verticalAlign=top;spacingLeft=8;spacingTop=4;fontSize=10;fillColor=#FFF9C4;strokeColor=#C9A800;" value="&lt;b&gt;Nota 4. Opcional&lt;/b&gt;&lt;br&gt;Se usar Cloud Fetch ou EXTERNAL_LINKS, liberar *.blob.core.windows.net TCP 443. Alternativa: disposition INLINE" vertex="1"><mxGeometry x="1190" y="1130" width="330" height="80" as="geometry" /></mxCell><mxCell id="note8l" parent="1" style="endArrow=none;dashed=1;html=1;strokeColor=#C9A800;strokeWidth=1;" edge="1" source="note8" target="ZpkIhXnUa3UjlWESDhhu-10"><mxGeometry relative="1" as="geometry" /></mxCell></root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

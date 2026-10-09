@@ -1,0 +1,99 @@
+# databricks-bundle-deploy-changed.yml
+# Job template: detecta os bundles alterados e executa validate + deploy.
+#
+# Uso:
+#   jobs:
+#   - template: /.azuredevops/templates/databricks-bundle-deploy-changed.yml
+#     parameters:
+#       environment: dev   # dev ou prd
+#
+# Requisitos:
+#   - Cada databricks.yml precisa declarar o target com o mesmo nome do ambiente (dev, prd)
+#   - O databricks.yml NAO declara workspace.host: o host vem de DATABRICKS_HOST, definido aqui
+#   - Testes automaticos de cada bundle rodam antes do deploy; falha nos testes impede o deploy do bundle
+#   - Service Principal da service connection com permissao de deploy na workspace
+#   - Build Service com permissao "View builds" no pipeline (padrao) para ler o ultimo build
+
+parameters:
+- name: environment
+  type: string
+  values:
+  - dev
+  - prd
+- name: forceAll
+  type: boolean
+  default: false
+- name: baseSha
+  type: string
+  default: ''
+- name: dependsOn
+  type: object
+  default: []
+- name: condition
+  type: string
+  default: succeeded()
+- name: debugMode
+  type: string
+  default: 'false'
+
+jobs:
+- job: DeployChangedBundles
+  displayName: 'Deploy dos bundles alterados (${{ parameters.environment }})'
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  pool:
+    # Imagem fixa: o label ubuntu-latest migra para Ubuntu 26.04 entre
+    # 19/10/2026 e 19/11/2026. Fixar evita a troca silenciosa do agente.
+    vmImage: ubuntu-24.04
+
+  variables:
+    ${{ if eq(parameters.environment, 'prd') }}:
+      BUNDLE_DATABRICKS_HOST: 'https://adb-6114343631149730.10.azuredatabricks.net'
+    ${{ if eq(parameters.environment, 'dev') }}:
+      BUNDLE_DATABRICKS_HOST: 'https://adb-1886204700223023.3.azuredatabricks.net'
+
+  steps:
+  - checkout: self
+    fetchDepth: 0
+    displayName: 'Checkout com historico completo'
+
+  - task: UsePythonVersion@0
+    displayName: 'Python para os testes'
+    inputs:
+      versionSpec: '3.12'
+
+  - task: AzureCLI@2
+    displayName: 'Testar, validar e implantar bundles alterados (${{ parameters.environment }})'
+    inputs:
+      ${{ if eq(parameters.environment, 'prd') }}:
+        azureSubscription: 'sc-vc-dbx-cicd-prod'
+      ${{ if eq(parameters.environment, 'dev') }}:
+        azureSubscription: 'sc-vc-dbx-cicd-dev'
+      scriptType: bash
+      scriptLocation: inlineScript
+      workingDirectory: '$(Build.SourcesDirectory)'
+      inlineScript: |
+        set -euo pipefail
+        # Remove CR caso o script tenha sido salvo com CRLF no Windows
+        script_file="$(mktemp)"
+        tr -d '\r' < .azuredevops/scripts/deploy-changed-bundles.sh > "${script_file}"
+        bash "${script_file}"
+    env:
+      DATABRICKS_HOST: '$(BUNDLE_DATABRICKS_HOST)'
+      DATABRICKS_AUTH_TYPE: 'azure-cli'
+      BUNDLE_TARGET: '${{ parameters.environment }}'
+      FORCE_ALL: '${{ parameters.forceAll }}'
+      BASE_SHA: '${{ parameters.baseSha }}'
+      DEBUG_MODE: '${{ parameters.debugMode }}'
+      TEST_RESULTS_DIR: '$(Build.ArtifactStagingDirectory)/test-results'
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+  # always(): publica os resultados tambem quando os testes falham
+  - task: PublishTestResults@2
+    displayName: 'Publicar resultados dos testes'
+    condition: always()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: '$(Build.ArtifactStagingDirectory)/test-results/*.xml'
+      testRunTitle: 'Bundles (${{ parameters.environment }})'
+      failTaskOnFailedTests: false

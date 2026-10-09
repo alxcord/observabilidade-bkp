@@ -1,0 +1,195 @@
+# azure-pipelines.yml — esteira da observability-api.
+#
+# O plano Flex Consumption publica um pacote de código (zip), então "build"
+# é empacotar, não construir imagem: não há imagem nem Azure Container
+# Registry. Só há um projeto Azure Functions neste repositório, por isso a
+# esteira fica standalone em vez de virar template.
+#
+# Estágios: Test -> Build -> Deploy dev -> Deploy prod (com approval gate em
+# prod). O pacote é construído uma vez e promovido sem reconstrução entre
+# ambientes.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - src/*
+
+variables:
+  projectPath: src
+
+stages:
+  # ---------------------------------------------------------------
+  # STAGE 1 - TEST
+  # Falha se tests/ não existir, antes de instalar qualquer dependência.
+  # ---------------------------------------------------------------
+  - stage: Test
+    jobs:
+      - job: RunTests
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              if [ ! -d "$(projectPath)/tests" ]; then
+                echo "##vso[task.logissue type=error]Pasta 'tests/' não encontrada em $(projectPath)."
+                exit 1
+              fi
+            displayName: 'Validar existência da pasta tests/'
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.11'
+
+          - script: |
+              cd $(projectPath)
+              pip install -r requirements.txt
+              pip install -r requirements-dev.txt
+            displayName: 'Instalar dependências'
+
+          - script: |
+              cd $(projectPath)
+              python -m pytest tests/ --junitxml=test-results.xml
+            displayName: 'Rodar testes'
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: '$(projectPath)/test-results.xml'
+              testRunTitle: 'observability-api'
+
+  # ---------------------------------------------------------------
+  # STAGE 2 - BUILD
+  # Empacota uma vez; a mesma zip é promovida de dev para prod, sem
+  # reempacotar.
+  # ---------------------------------------------------------------
+  - stage: Build
+    dependsOn: Test
+    condition: succeeded()
+    jobs:
+      - job: Package
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: |
+              set -euo pipefail
+              stagingPkg="$(Build.ArtifactStagingDirectory)/package"
+              mkdir -p "$stagingPkg"
+              cp -r $(projectPath)/. "$stagingPkg"/
+
+              # Fora do runtime da Function: testes, infra (Bicep é
+              # aplicado à parte, não faz parte do pacote de código),
+              # dependências só de desenvolvimento, e a própria esteira.
+              rm -rf "$stagingPkg"/tests
+              rm -rf "$stagingPkg"/infra
+              rm -f "$stagingPkg"/requirements-dev.txt
+              rm -f "$stagingPkg"/README.md
+              rm -f "$stagingPkg"/azure-pipelines.yml
+              find "$stagingPkg" -name '__pycache__' -o -name '*.pyc' | xargs -r rm -rf
+
+              cd "$stagingPkg"
+              zip -r "$(Build.ArtifactStagingDirectory)/functionapp.zip" .
+            displayName: 'Empacotar (zip)'
+
+          - publish: '$(Build.ArtifactStagingDirectory)/functionapp.zip'
+            artifact: functionapp
+
+  # ---------------------------------------------------------------
+  # STAGE 3 - DEPLOY DEV
+  # Environment "dev" no Azure DevOps, sem approval gate. Provisiona a
+  # infraestrutura (idempotente) e só então publica o pacote.
+  # ---------------------------------------------------------------
+  - stage: DeployDev
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployDev
+        environment: 'dev'
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Job de deployment não faz checkout sozinho, e o Bicep é
+                # aplicado a partir do repositório: sem isto o
+                # --template-file aponta para um arquivo que não existe no
+                # agente.
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: 'Provisionar infraestrutura (Bicep)'
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-dev'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group create \
+                        --resource-group rg-analytics-dev-vcbr \
+                        --template-file $(projectPath)/infra/main.bicep \
+                        --parameters $(projectPath)/infra/params.json \
+                        --parameters environment=dev
+
+                - task: AzureCLI@2
+                  displayName: 'Publicar pacote (zip deploy)'
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-dev'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az functionapp deploy \
+                        --resource-group rg-analytics-dev-vcbr \
+                        --name AF-OBSERV-DEV-VCBR \
+                        --src-path $(Pipeline.Workspace)/functionapp/functionapp.zip \
+                        --type zip \
+                        --build-remote true
+
+  # ---------------------------------------------------------------
+  # STAGE 4 - DEPLOY PROD
+  # Environment "prod" com approval gate configurado em
+  # Pipelines > Environments > prod > Approvals and checks.
+  # ---------------------------------------------------------------
+  - stage: DeployProd
+    dependsOn: DeployDev
+    condition: succeeded()
+    jobs:
+      - deployment: DeployProd
+        environment: 'prod'
+        pool:
+          vmImage: ubuntu-latest
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Job de deployment não faz checkout sozinho, e o Bicep é
+                # aplicado a partir do repositório: sem isto o
+                # --template-file aponta para um arquivo que não existe no
+                # agente.
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: 'Provisionar infraestrutura (Bicep)'
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-prod'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az deployment group create \
+                        --resource-group rg-analytics-vcbr \
+                        --template-file $(projectPath)/infra/main.bicep \
+                        --parameters $(projectPath)/infra/params.json \
+                        --parameters environment=prod
+
+                - task: AzureCLI@2
+                  displayName: 'Publicar pacote (zip deploy)'
+                  inputs:
+                    azureSubscription: 'sc-observabilidade-prod'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az functionapp deploy \
+                        --resource-group rg-analytics-vcbr \
+                        --name AF-OBSERV-VCBR \
+                        --src-path $(Pipeline.Workspace)/functionapp/functionapp.zip \
+                        --type zip \
+                        --build-remote true

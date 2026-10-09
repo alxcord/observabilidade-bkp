@@ -1,0 +1,87 @@
+# publish-wiki.yml
+# Job template: publica a documentacao do repositorio no wiki do projeto.
+#
+# Uso:
+#   jobs:
+#   - template: /.azuredevops/templates/publish-wiki.yml
+#     parameters:
+#       wikiRepoUrl: 'https://grupovotorantim.visualstudio.com/VC-ANALYTICS/_git/VC-ANALYTICS.wiki'
+#       repoWebUrl: $(EXPECTED_REPO_URL)
+#       repoBranch: main
+#
+# Requisitos:
+#   - Wiki provisionado no projeto, com a branch wikiMaster
+#   - Build Service do projeto (nao o service principal da Service Connection)
+#     com Contribute no repo <Projeto>.wiki. Em Project Settings > Repositories >
+#     <Projeto>.wiki > Security, selecione "<Projeto> Build Service (<org>)",
+#     nao "Project Collection Build Service Accounts".
+#   - O job usa System.AccessToken; nenhuma Service Connection e necessaria
+#
+# O processo e descrito em docs/publicacao-wiki.md.
+
+parameters:
+- name: wikiRepoUrl
+  type: string
+- name: wikiBranch
+  type: string
+  default: wikiMaster
+- name: wikiRoot
+  type: string
+  default: Projetos-e-Iniciativas/Plataforma
+- name: repoWebUrl
+  type: string
+  default: ''
+- name: repoBranch
+  type: string
+  default: main
+- name: dryRun
+  type: boolean
+  default: false
+- name: dependsOn
+  type: object
+  default: []
+- name: condition
+  type: string
+  default: succeeded()
+- name: debugMode
+  type: string
+  default: 'false'
+
+jobs:
+- job: PublishWiki
+  displayName: 'Publicar documentacao no wiki'
+  dependsOn: ${{ parameters.dependsOn }}
+  condition: ${{ parameters.condition }}
+  pool:
+    # Imagem fixa: o label ubuntu-latest migra para Ubuntu 26.04 entre
+    # 19/10/2026 e 19/11/2026. Fixar evita a troca silenciosa do agente.
+    vmImage: ubuntu-24.04
+
+  steps:
+  # A documentacao e lida do checkout, nao do historico: profundidade 1 basta.
+  - checkout: self
+    fetchDepth: 1
+    displayName: 'Checkout do repositorio'
+
+  - task: UsePythonVersion@0
+    displayName: 'Python para o gerador de paginas'
+    inputs:
+      versionSpec: '3.12'
+
+  - bash: |
+      set -euo pipefail
+      # Remove CR caso o script tenha sido salvo com CRLF no Windows
+      script_file="$(mktemp)"
+      tr -d '\r' < .azuredevops/scripts/publish-wiki.sh > "${script_file}"
+      bash "${script_file}"
+    displayName: 'Montar e publicar as paginas'
+    workingDirectory: '$(Build.SourcesDirectory)'
+    env:
+      WIKI_REPO_URL: '${{ parameters.wikiRepoUrl }}'
+      WIKI_BRANCH: '${{ parameters.wikiBranch }}'
+      WIKI_ROOT: '${{ parameters.wikiRoot }}'
+      REPO_WEB_URL: '${{ parameters.repoWebUrl }}'
+      REPO_BRANCH: '${{ parameters.repoBranch }}'
+      DRY_RUN: '${{ parameters.dryRun }}'
+      DEBUG_MODE: '${{ parameters.debugMode }}'
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)

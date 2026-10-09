@@ -1,0 +1,34 @@
+parameters:
+- name: serviceConnection
+  type: string
+- name: databricksHost
+  type: string
+- name: bundleRoot
+  type: string
+- name: target
+  type: string
+
+steps:
+- task: AzureCLI@2
+  displayName: 'Validar Databricks Bundle (${{ parameters.target }})'
+  inputs:
+    azureSubscription: '${{ parameters.serviceConnection }}'
+    scriptType: bash
+    scriptLocation: inlineScript
+    workingDirectory: '${{ parameters.bundleRoot }}'
+    inlineScript: |
+      set -euo pipefail
+
+      if ! command -v databricks >/dev/null 2>&1; then
+        echo "Instalando Databricks CLI..."
+        curl --fail --silent --show-error --location \
+          https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh \
+          | sh
+      fi
+
+      databricks version
+      databricks bundle validate --target "${BUNDLE_TARGET}"
+  env:
+    DATABRICKS_HOST: '${{ parameters.databricksHost }}'
+    DATABRICKS_AUTH_TYPE: 'azure-cli'
+    BUNDLE_TARGET: '${{ parameters.target }}'

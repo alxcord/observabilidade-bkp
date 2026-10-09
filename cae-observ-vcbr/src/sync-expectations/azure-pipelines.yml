@@ -1,0 +1,19 @@
+# sync-expectations/azure-pipelines.yml
+#
+# Dispara só quando algo dentro desta pasta muda. Toda a lógica de esteira
+# vem do template compartilhado — criar um projeto novo é copiar a pasta.
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - src/sync-expectations/*
+
+extends:
+  template: ../templates/test-build-push-deploy.yml
+  parameters:
+    projectPath: src/sync-expectations
+    imageName: sync-expectations
+    # buildContext default (a própria pasta do projeto): o Dockerfile não
+    # copia mais nada de fora dela.
